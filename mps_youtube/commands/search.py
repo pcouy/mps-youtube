@@ -3,6 +3,7 @@ import json
 import math
 import base64
 import logging
+import os
 from datetime import datetime, timedelta
 
 from argparse import ArgumentParser
@@ -55,6 +56,40 @@ def _search(progtext, qs=None, msg=None, failmsg=None):
     paginatesongs(slicer, length=length, msg=msg, failmsg=failmsg,
             loadmsg=loadmsg)
 
+
+def _search_multiple(progtext, qss=None, msg=None, failmsg=None):
+    """ Perform memoized url fetch, display progtext. """
+
+    loadmsg = "Searching for '%s%s%s'" % (c.y, progtext, c.w)
+    
+    wdatas = []
+    wdata = {
+            'pageInfo':{'totalResults': 0},
+            'items': []
+            }
+    for qs in qss:
+        data = pafy.call_gdata('search', qs)
+        wdata['pageInfo']['totalResults']+= data['pageInfo']['totalResults']
+        for item in data["items"]:
+            wdata['items'].append(item)
+
+    def convdate(item):
+        return datetime.strptime(item['snippet']['publishedAt'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
+
+    wdata['items'].sort(key=convdate, reverse=True)
+
+
+    def iter_songs():
+        wdata2 = wdata
+        for song in get_tracks_from_json(wdata2):
+            yield song
+
+    # The youtube search api returns a maximum of 500 results
+    length = wdata['pageInfo']['totalResults']
+    slicer = util.IterSlicer(iter_songs(), length)
+
+    paginatesongs(slicer, length=length, msg=msg, failmsg=failmsg,
+            loadmsg=loadmsg)
 
 def token(page):
     """ Returns a page token for a given start index. """
@@ -158,6 +193,53 @@ def channelfromname(user):
     # at this point, we know the channel id associated to a user name
     return (user, channel_id)
 
+@command(r'subs\s+(.+)')
+def fetchSubs(sublist):
+    f = open(os.path.join(g.SUBSFOLDER, sublist))
+    
+    lines = f.readlines()
+    users = []
+    channel_ids = []
+    for line in lines:
+        query = line.split(';')
+        users.append(query[0])
+        channel_ids.append(query[1])
+
+    f.close()
+
+    usersearch_multiple_id(users, channel_ids)
+
+@command(r'subchannels\s+(.+)\s+(.+)')
+def channelsearch(q_user, sublist):
+
+    qs = {'part': 'id,snippet',
+          'q': q_user,
+          'maxResults': 50,
+          'type': 'channel',
+          'order': "relevance"
+          }
+
+    QueryObj = contentquery.ContentQuery(listview.ListUser, 'search', qs)
+    columns = [
+        {"name": "idx", "size": 3, "heading": "Num"},
+        {"name": "name", "size": 30, "heading": "Username"},
+        {"name": "description", "size": "remaining", "heading": "Description"},
+        ]
+
+    def run_m(user_id):
+        """ Search ! """
+        if not os.path.isdir(g.SUBSFOLDER):
+            os.mkdir(g.SUBSFOLDER)
+        f = open(os.path.join(g.SUBSFOLDER, sublist), 'a')
+        f.write(';'.join(user_id[0]))
+        f.write("\n")
+        f.close()
+    del g.content
+
+    g.content = listview.ListView(columns, QueryObj, run_m)
+    g.message = "Results for channel search: '%s'" % q_user
+
+
 
 @command(r'channels\s+(.+)')
 def channelsearch(q_user):
@@ -232,6 +314,36 @@ Use 'set search_music False' to show results not in the Music category.""" % ter
 
     _search(progtext, query, msg, failmsg)
 
+def usersearch_multiple_id(users, channel_ids):
+    """ Performs a search within a user's (i.e. a channel's) uploads
+    for an optional search term with the user (i.e. the channel)
+    identified by its ID """
+
+    
+    term = ""
+    queries = []
+    user = ', '.join(users)
+
+    query = generate_search_qs(term)
+    aliases = dict(views='viewCount')  # The value of the config item is 'views' not 'viewCount'
+    if config.USER_ORDER.get:
+        query['order'] = aliases.get(config.USER_ORDER.get,
+                config.USER_ORDER.get)
+    for channel_id in channel_ids:
+        query['channelId'] = channel_id
+        queries.append(query.copy())
+
+    msg = "Video uploads by {2}{4}{0}"
+    progtext = c.y + user + c.w
+    term = ""
+    if config.SEARCH_MUSIC:
+        failmsg = """User %s not found or has no videos in the Music category.
+Use 'set search_music False' to show results not in the Music category.""" % progtext
+    else:
+        failmsg = "User %s not found or has no videos."  % progtext
+    msg = str(msg).format(c.w, c.y, c.y, term, user)
+
+    _search_multiple(progtext, queries, msg, failmsg)
 
 def related_search(vitem):
     """ Fetch uploads by a YouTube user. """
@@ -449,12 +561,13 @@ def get_tracks_from_json(jsons):
                 for i in items
                 if i['id']['kind'] == 'youtube#video']
 
-    qs = {'part':'contentDetails,statistics,snippet',
-          'id': ','.join(id_list)}
+    items_vidinfo = []
+    for i in range(0, len(id_list), 50):
+        qs = {'part':'contentDetails,statistics,snippet',
+              'id': ','.join(id_list[i:i+50])}
+        wdata = pafy.call_gdata('videos', qs)
+        items_vidinfo+= wdata['items']
 
-    wdata = pafy.call_gdata('videos', qs)
-
-    items_vidinfo = wdata.get('items', [])
     # enhance search results by adding information from videos API response
     for searchresult, vidinfoitem in zip(items, items_vidinfo):
         searchresult.update(vidinfoitem)
