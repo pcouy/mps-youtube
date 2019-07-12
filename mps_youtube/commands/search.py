@@ -104,13 +104,13 @@ def token(page):
     return b64.strip('=')
 
 
-def generate_search_qs(term, match='term', videoDuration='any', after=None, category=None, is_live=False):
+def generate_search_qs(term, match='term', videoDuration='any', after=None, category=None, is_live=False, max_results=50):
     """ Return query string. """
 
     aliases = dict(views='viewCount')
     qs = {
         'q': term,
-        'maxResults': 50,
+        'maxResults': max_results,
         'safeSearch': "none",
         'order': aliases.get(config.ORDER.get, config.ORDER.get),
         'part': 'id,snippet',
@@ -210,7 +210,7 @@ def fetchSubs(sublist):
     usersearch_multiple_id(users, channel_ids)
 
 @command(r'subchannels\s+(.+)\s+(.+)')
-def channelsearch(q_user, sublist):
+def channelsearch(sublist, q_user):
 
     qs = {'part': 'id,snippet',
           'q': q_user,
@@ -324,7 +324,7 @@ def usersearch_multiple_id(users, channel_ids):
     queries = []
     user = ', '.join(users)
 
-    query = generate_search_qs(term)
+    query = generate_search_qs(term, max_results=20)
     aliases = dict(views='viewCount')  # The value of the config item is 'views' not 'viewCount'
     if config.USER_ORDER.get:
         query['order'] = aliases.get(config.USER_ORDER.get,
@@ -561,6 +561,7 @@ def get_tracks_from_json(jsons):
                 for i in items
                 if i['id']['kind'] == 'youtube#video']
 
+    id_list = id_list[0:500]
     items_vidinfo = []
     for i in range(0, len(id_list), 50):
         qs = {'part':'contentDetails,statistics,snippet',
