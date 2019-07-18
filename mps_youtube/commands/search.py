@@ -563,16 +563,45 @@ def get_tracks_from_json(jsons):
                 if i['id']['kind'] == 'youtube#video']
 
     id_list = id_list[0:500]
-    items_vidinfo = []
-    for i in range(0, len(id_list), 50):
-        qs = {'part':'contentDetails,statistics,snippet',
-              'id': ','.join(id_list[i:i+50])}
-        wdata = pafy.call_gdata('videos', qs)
-        items_vidinfo+= wdata['items']
+    items_vidinfo = [0 for _ in range(len(id_list))]
+    items_to_fetch = {}
+
+    if not os.path.isdir(g.CACHEFOLDER):
+        os.mkdir(g.CACHEFOLDER)
+    for i, vidId in enumerate(id_list):
+        cacheFile = os.path.join(g.CACHEFOLDER,vidId[:2],vidId)
+        if os.path.isfile(cacheFile): # If vidId is already cached
+            with open(cacheFile) as f:
+                items_vidinfo[i] = json.load(f)
+        else:
+            items_to_fetch[vidId] = i
+
+        if len(items_to_fetch) == 50 or i == len(id_list)-1:
+            items_to_fetch_keys = items_to_fetch.keys()
+            qs = {'part':'contentDetails,statistics,snippet',
+                  'id': ','.join(items_to_fetch_keys)}
+            wdata = pafy.call_gdata('videos', qs)
+
+            for key, value in zip(items_to_fetch_keys, wdata['items']):
+                idx = items_to_fetch[key]
+                items_vidinfo[idx] = value
+
+                if not os.path.isdir(os.path.join(g.CACHEFOLDER,key[:2])):
+                    os.mkdir(os.path.join(g.CACHEFOLDER,key[:2]))
+                with open(os.path.join(g.CACHEFOLDER,key[:2],key), 'w') as f:
+                    json.dump(value, f)
+            items_to_fetch = {}
+
 
     # enhance search results by adding information from videos API response
     for searchresult, vidinfoitem in zip(items, items_vidinfo):
-        searchresult.update(vidinfoitem)
+        try:
+            searchresult.update(vidinfoitem)
+        except Exception as e:
+            print(vidinfoitem)
+            print(searchresult)
+            print(e)
+            exit()
 
     # populate list of video objects
     songs = []
