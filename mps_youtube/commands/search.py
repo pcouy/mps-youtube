@@ -62,7 +62,6 @@ def _search_multiple(progtext, qss=None, msg=None, failmsg=None):
 
     loadmsg = "Searching for '%s%s%s'" % (c.y, progtext, c.w)
     
-    wdatas = []
     wdata = {
             'pageInfo':{'totalResults': 0},
             'items': []
@@ -77,6 +76,7 @@ def _search_multiple(progtext, qss=None, msg=None, failmsg=None):
         return datetime.strptime(item['snippet']['publishedAt'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
 
     wdata['items'].sort(key=convdate, reverse=True)
+    wdata['items'] = wdata['items'][0:50]
 
 
     def iter_songs():
@@ -552,6 +552,7 @@ def get_tracks_from_json(jsons):
     """ Get search results from API response """
 
     items = jsons.get("items")
+    items = items[0:500]
     if not items:
         util.dbg("got unexpected data or no search results")
         return ()
